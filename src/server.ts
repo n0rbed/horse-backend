@@ -41,7 +41,7 @@ connectDatabase().then(() => {
   const { httpServer, io } = initWsClient(app);
 
   // ✅ Listen on HTTP server (not app)
-  const server = httpServer.listen(PORT, () => {
+  const server = httpServer.listen(Number(PORT), "0.0.0.0", () => {
     console.log(`🚀 Server running on port ${PORT}...`);
 
     // Initialize AWS IoT MQTT connection
