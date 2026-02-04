@@ -74,6 +74,13 @@ export declare const updateFeedingSchema: z.ZodObject<{
     notes: z.ZodOptional<z.ZodOptional<z.ZodString>>;
     deviceId: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
+export declare const FeedNowSchema: z.ZodObject<{
+    horseId: z.ZodUUID;
+    amountKg: z.ZodNumber;
+}, z.core.$strip>;
+export declare const StartStreamSchema: z.ZodObject<{
+    horseId: z.ZodUUID;
+}, z.core.$strip>;
 export type UserSignupInput = z.infer<typeof userSignupSchema>;
 export type UserLoginInput = z.infer<typeof userLoginSchema>;
 export type UpdatePasswordInput = z.infer<typeof updatePasswordSchema>;

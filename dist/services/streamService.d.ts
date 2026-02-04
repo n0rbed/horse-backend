@@ -7,7 +7,7 @@ export declare function generateStreamToken(deviceId: string): Promise<{
 }>;
 /**
  * Validate stream token by hashing and comparing
- * ✅ Returns camera device ID if valid
+ *  Returns camera device ID if valid
  */
 export declare function validateStreamToken(token: string): Promise<{
     id: string;

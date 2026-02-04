@@ -13,21 +13,6 @@ function hashToken(token) {
  * ✅ Now works for CAMERA devices only
  */
 export async function generateStreamToken(deviceId) {
-    // ✅ Verify device exists and is CAMERA type
-    const device = await prisma.device.findUnique({
-        where: { id: deviceId },
-        select: {
-            id: true,
-            deviceType: true,
-            thingName: true,
-        },
-    });
-    if (!device) {
-        throw new AppError("Device not found", 404);
-    }
-    if (device.deviceType !== "CAMERA") {
-        throw new AppError("Only CAMERA devices can generate stream tokens", 400);
-    }
     // Generate random token to send to client
     const token = crypto.randomBytes(32).toString("hex");
     // Hash the token before storing in database
@@ -35,16 +20,16 @@ export async function generateStreamToken(deviceId) {
     await prisma.device.update({
         where: { id: deviceId },
         data: {
-            streamToken: hashedToken, // ✅ Device.streamToken
-            streamTokenIsValid: true, // ✅ Device.streamTokenIsValid
+            streamToken: hashedToken,
+            streamTokenIsValid: true,
         },
     });
-    console.log(`📹 Stream token generated for camera: ${device.thingName}`);
+    console.log(`📹 Stream token generated for camera: ${deviceId}`);
     return { token }; // Return unhashed token to client
 }
 /**
  * Validate stream token by hashing and comparing
- * ✅ Returns camera device ID if valid
+ *  Returns camera device ID if valid
  */
 export async function validateStreamToken(token) {
     const hashedToken = hashToken(token);
@@ -52,7 +37,7 @@ export async function validateStreamToken(token) {
         where: {
             streamToken: hashedToken,
             streamTokenIsValid: true,
-            deviceType: "CAMERA", // ✅ Only CAMERA devices
+            deviceType: "CAMERA",
         },
         select: {
             id: true,
@@ -68,7 +53,7 @@ export async function validateStreamToken(token) {
  * Invalidate stream token
  */
 export async function invalidateStreamToken(deviceId) {
-    // ✅ Verify device exists before invalidating
+    //  Verify device exists before invalidating
     const device = await prisma.device.findUnique({
         where: { id: deviceId },
         select: { id: true, deviceType: true },

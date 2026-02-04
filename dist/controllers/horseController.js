@@ -6,6 +6,7 @@ import APIFeatures, { parseFields } from "../utils/apiFeatures.js";
 import { FeedingStatus } from "@prisma/client";
 export const getAllHorses = async (req, res, next) => {
     try {
+        const { unassigned } = req.query;
         // Build query with ALL features
         const features = new APIFeatures(req.query)
             .limitFields()
@@ -21,8 +22,6 @@ export const getAllHorses = async (req, res, next) => {
             image: true,
             breed: true,
             age: true,
-            location: true,
-            defaultAmountKg: true,
             lastFeedAt: true,
             ownerId: true,
             owner: {
@@ -32,29 +31,6 @@ export const getAllHorses = async (req, res, next) => {
                     email: true,
                 },
             },
-            // ✅ NEW: Include both feeder and camera devices
-            // feeder: {
-            //   select: {
-            //     id: true,
-            //     deviceType: true,
-            //     thingName: true,
-            //     location: true,
-            //     feederType: true,
-            //     morningTime: true,
-            //     dayTime: true,
-            //     nightTime: true,
-            //   },
-            // },
-            // camera: {
-            //   select: {
-            //     id: true,
-            //     deviceType: true,
-            //     thingName: true,
-            //     location: true,
-            //     streamToken: true,
-            //     streamTokenIsValid: true,
-            //   },
-            // },
         };
         // MERGE: User fields + always include relations/count
         const relationsDisabled = prismaQuery.relationsDisabled || false;
@@ -115,6 +91,7 @@ export const getMyHorses = async (req, res, next) => {
             feeder: {
                 select: {
                     feederType: true,
+                    thingName: true,
                 },
             },
         };

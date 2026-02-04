@@ -11,7 +11,7 @@ import { prisma } from "./lib/prisma.js";
 import streamRoutes from "./routes/streamRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import horseRoutes from "./routes/horseRoutes.js";
-import testRoutes from "./routes/testRoutes.js";
+// import testRoutes from "./routes/testRoutes.js";
 // WebSocket setup
 import { setupCameraWs } from "./ws/cameraWs.js";
 // import { setupClientWs } from "./ws/clientWs.js";
@@ -57,7 +57,6 @@ app.use("/stream", streamRoutes);
 app.use("/api/v1/horses", horseRoutes);
 // /horses/:horseId/feeding/active
 //test to simulate iot incoming messages
-app.use("/api/v1", testRoutes);
 // app.use("/api/v1/feeders", feederRoutes);
 //no need right now
 // app.use("/api/v1/feedings", feedingRoutes);

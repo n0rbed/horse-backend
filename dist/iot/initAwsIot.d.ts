@@ -1,4 +1,6 @@
+import { MqttClient } from "mqtt";
 import type { DeviceEventHandler, CommandPayload } from "../types/globalTypes.js";
+export declare function getAwsMqttClient(): MqttClient;
 /**
  * Initialize AWS IoT Core (FEEDERS + CAMERAS)
  */
@@ -19,10 +21,15 @@ export declare function publishFeedCommand(thingName: string, command: Omit<Comm
 export declare function publishStreamCommand(thingName: string, command: Omit<CommandPayload, "type"> & {
     type: "STREAM_COMMAND";
 }): Promise<void>;
-export declare function getClientStatus(): {
-    connected: boolean;
-    reconnecting: boolean;
-    subscribers: number;
-};
 export declare function disconnect(): Promise<void>;
+/**
+ * Tell many feeders to START publishing weight (device firmware must support this)
+ * Publishes to: feeders/{thingName}/commands
+ */
+export declare function publishWeightStreamStartMany(thingNames: string[]): Promise<void>;
+/**
+ * Tell many feeders to STOP publishing weight (device firmware must support this)
+ * Publishes to: feeders/{thingName}/commands
+ */
+export declare function publishWeightStreamStopMany(thingNames: string[]): Promise<void>;
 //# sourceMappingURL=initAwsIot.d.ts.map

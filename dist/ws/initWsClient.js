@@ -16,6 +16,7 @@ export function initWsClient(app) {
     });
     // ✅ Setup Socket.IO handlers from clientWs.ts
     setupClientWs(io);
+    // setupWeightStreaming()
     return { httpServer, io };
 }
 //# sourceMappingURL=initWsClient.js.map

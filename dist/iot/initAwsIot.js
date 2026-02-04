@@ -2,25 +2,27 @@
 import fs from "fs";
 import path from "path";
 import mqtt, { MqttClient } from "mqtt";
+import { emitToRoom } from "../ws/clientWs.js";
 // ============================================================================
 // CLIENT STATE
 // ============================================================================
 let client = null;
 let deviceEventHandler = null;
-const connectionState = {
-    connected: false,
-    reconnecting: false,
-};
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
+export function getAwsMqttClient() {
+    if (!client)
+        throw new Error("AWS IoT client not initialized");
+    return client;
+}
 function validateEnv(env) {
     const required = [
         "AWS_IOT_ENDPOINT",
         "AWS_IOT_CLIENT_ID",
-        "AWS_IOT_KEY_PATH",
-        "AWS_IOT_CERT_PATH",
-        "AWS_IOT_CA_PATH",
+        "AWS_IOT_PRIVATE_KEY",
+        "AWS_IOT_CERTIFICATE",
+        "AWS_IOT_CA",
     ];
     for (const key of required) {
         if (!env[key]) {
@@ -28,18 +30,21 @@ function validateEnv(env) {
         }
     }
 }
+function normalizePem(value) {
+    return value.replace(/\\n/g, "\n");
+}
 function createClientOptions() {
     const env = process.env;
     validateEnv(env);
     return {
         host: env.AWS_IOT_ENDPOINT,
-        protocol: "mqtt",
+        protocol: "mqtts",
         port: 8883,
-        clientId: env.AWS_IOT_CLIENT_ID || "horse-feeder-backend",
+        clientId: env.AWS_IOT_CLIENT_ID,
         clean: true,
-        key: fs.readFileSync(path.resolve(env.AWS_IOT_KEY_PATH)),
-        cert: fs.readFileSync(path.resolve(env.AWS_IOT_CERT_PATH)),
-        ca: fs.readFileSync(path.resolve(env.AWS_IOT_CA_PATH)),
+        key: normalizePem(env.AWS_IOT_PRIVATE_KEY),
+        cert: normalizePem(env.AWS_IOT_CERTIFICATE),
+        ca: normalizePem(env.AWS_IOT_CA),
         reconnectPeriod: 2000,
         connectTimeout: 30 * 1000,
         keepalive: 60,
@@ -101,13 +106,6 @@ export async function publishFeedCommand(thingName, command) {
 export async function publishStreamCommand(thingName, command) {
     await publishCommand(thingName, { ...command, type: "STREAM_COMMAND" });
 }
-export function getClientStatus() {
-    return {
-        connected: client?.connected || false,
-        reconnecting: connectionState.reconnecting,
-        subscribers: client ? client.subscribersCount || 0 : 0,
-    };
-}
 export function disconnect() {
     return new Promise((resolve) => {
         if (!client) {
@@ -122,45 +120,28 @@ export function disconnect() {
         });
     });
 }
-// ============================================================================
-// PRIVATE EVENT HANDLERS
-// ============================================================================
 function setupConnectionHandlers() {
     if (!client)
         return;
     client.on("connect", () => {
-        connectionState.connected = true;
-        connectionState.reconnecting = false;
-        console.log("✅ Connected to AWS IoT Core");
-        // ✅ Subscribe to ALL devices: feeders/*/events + cameras/*/events
-        const topics = ["feeders/+/events", "cameras/+/events"];
-        topics.forEach((topic) => {
-            client.subscribe(topic, { qos: 1 }, (err) => {
-                if (err) {
-                    console.error(`❌ Failed to subscribe to ${topic}:`, err.message);
-                }
-                else {
-                    console.log(`📡 Subscribed to ${topic} (QoS 1)`);
-                }
-            });
+        console.log("✅ AWS IoT connected");
+        // Subscribe to all feeder/camera event topics
+        client.subscribe(["feeders/#", "cameras/#"], { qos: 1 }, (err, granted) => {
+            if (err) {
+                console.error("❌ Subscribe failed:", err);
+                return;
+            }
+            console.log("✅ Subscribed:", granted);
         });
     });
+    client.on("error", (err) => {
+        console.error("❌ AWS IoT error:", err);
+    });
     client.on("reconnect", () => {
-        connectionState.reconnecting = true;
-        console.log("🔄 AWS IoT reconnecting...");
+        console.warn("🔁 AWS IoT reconnecting...");
     });
     client.on("close", () => {
-        connectionState.connected = false;
-        connectionState.reconnecting = false;
-        console.log("🔌 AWS IoT connection closed");
-    });
-    client.on("offline", () => {
-        connectionState.connected = false;
-        connectionState.reconnecting = false;
-        console.log("📴 AWS IoT client went offline");
-    });
-    client.on("error", (err) => {
-        console.error("❌ AWS IoT client error:", err.message);
+        console.warn("🔌 AWS IoT connection closed");
     });
 }
 function setupMessageHandlers() {
@@ -168,21 +149,62 @@ function setupMessageHandlers() {
         return;
     client.on("message", async (topic, payload) => {
         try {
-            // Extract device type + thingName: feeders/{thingName}/events OR cameras/{thingName}/events
             const parts = topic.split("/");
-            if (parts.length < 3 || parts[2] !== "events") {
+            // Validate basic topic structure: {deviceType}/{thingName}/{action}
+            if (parts.length < 3) {
                 console.warn(`⚠️ Ignoring invalid topic: ${topic}`);
                 return;
             }
             const deviceType = parts[0];
             const thingName = parts[1];
+            const action = parts[2];
             if (!thingName) {
                 console.warn(`⚠️ Missing thingName in topic: ${topic}`);
                 return;
             }
-            // ✅ Parse polymorphic message
+            // ---- WEIGHT STREAM: feeders/{thingName}/weight-event ----
+            if (deviceType === "feeders" && action === "weight-events") {
+                const text = payload.toString("utf8").trim();
+                let weightValue = null;
+                // Accept both JSON payloads and plain numeric strings
+                if (text.startsWith("{")) {
+                    const parsed = JSON.parse(text);
+                    if (parsed.weight !== undefined) {
+                        const n = typeof parsed.weight === "string"
+                            ? parseFloat(parsed.weight)
+                            : parsed.weight;
+                        if (Number.isFinite(n))
+                            weightValue = n;
+                    }
+                }
+                else {
+                    const n = parseFloat(text);
+                    if (Number.isFinite(n))
+                        weightValue = n;
+                }
+                if (weightValue === null) {
+                    console.warn("⚠️ Invalid weight payload", { topic, text });
+                    return;
+                }
+                emitToRoom(`feeder-weight:${thingName}`, "FEEDER_WEIGHT", {
+                    type: "FEEDER_WEIGHT",
+                    thingName,
+                    weight: weightValue,
+                });
+                return;
+            }
+            // ---- DEVICE EVENTS: feeders/{thingName}/events OR cameras/{thingName}/events ----
+            if (action !== "events") {
+                console.warn(`⚠️ Ignoring unknown action: ${topic}`);
+                return;
+            }
+            if (deviceType !== "feeders" && deviceType !== "cameras") {
+                console.warn(`⚠️ Ignoring unknown device type: ${topic}`);
+                return;
+            }
+            // Parse polymorphic message
             const rawMsg = JSON.parse(payload.toString());
-            // ✅ Route by device type (type narrowing)
+            // Route by device type
             let msg;
             if (deviceType === "feeders" && "feedingId" in rawMsg) {
                 msg = rawMsg;
@@ -194,12 +216,11 @@ function setupMessageHandlers() {
                 console.warn(`⚠️ Invalid message type from ${thingName}:`, rawMsg);
                 return;
             }
-            // ✅ Create complete DeviceEvent
+            // Create complete DeviceEvent
             const event = {
                 topic,
                 thingName,
                 msg,
-                timestamp: new Date(),
             };
             if (deviceEventHandler) {
                 await deviceEventHandler(event);
@@ -209,5 +230,35 @@ function setupMessageHandlers() {
             console.error(`❌ Failed to process message from topic ${topic}:`, error);
         }
     });
+}
+async function publishFeederWeightCommand(thingName, command) {
+    if (!client?.connected)
+        return;
+    const topic = `feeders/${thingName}/weight-commands`;
+    const payload = JSON.stringify(command);
+    console.log("topic from loginnnn", topic);
+    console.log("payload from loginnnn", payload);
+    await new Promise((resolve, reject) => {
+        client.publish(topic, payload, { qos: 1 }, (err) => err ? reject(err) : resolve());
+    });
+}
+/**
+ * Tell many feeders to START publishing weight (device firmware must support this)
+ * Publishes to: feeders/{thingName}/commands
+ */
+export async function publishWeightStreamStartMany(thingNames) {
+    await Promise.all(thingNames.map((thingName) => publishFeederWeightCommand(thingName, {
+        type: "WEIGHT_STREAM_START",
+        thingName,
+    })));
+}
+/**
+ * Tell many feeders to STOP publishing weight (device firmware must support this)
+ * Publishes to: feeders/{thingName}/commands
+ */
+export async function publishWeightStreamStopMany(thingNames) {
+    await Promise.all(thingNames.map((thingName) => publishFeederWeightCommand(thingName, {
+        type: "WEIGHT_STREAM_STOP",
+    })));
 }
 //# sourceMappingURL=initAwsIot.js.map

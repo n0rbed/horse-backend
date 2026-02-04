@@ -95,4 +95,11 @@ export const createFeedingSchema = z.object({
     deviceId: z.string().uuid("Must be a valid Device UUID"),
 });
 export const updateFeedingSchema = createFeedingSchema.partial();
+export const FeedNowSchema = z.object({
+    horseId: z.uuid("Not Valid UUID"),
+    amountKg: z.number().positive().max(50),
+});
+export const StartStreamSchema = z.object({
+    horseId: z.uuid("Not a Valid UUID"),
+});
 //# sourceMappingURL=validators.js.map

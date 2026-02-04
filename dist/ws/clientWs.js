@@ -1,59 +1,118 @@
 import AppError from "../utils/appError.js";
 import { protectWs } from "../controllers/authController.js";
 import { startFeeding, startStreaming } from "../services/deviceService.js";
+import { FeedNowSchema, StartStreamSchema } from "../lib/validators.js";
+import { handleDisconnecting, handleLogout, initializeWeightStreaming, } from "./weightStreaming.js";
 /**
  * Store Socket.IO server instance globally for broadcasting
  */
 let ioInstance = null;
+function shouldDisconnect(err) {
+    if (err instanceof AppError) {
+        // treat these as malicious / invalid usage
+        return [400, 401, 403, 422, 429].includes(err.statusCode);
+    }
+    // unknown errors: your choice
+    return false;
+}
+function punish(socket, err, action) {
+    const message = err instanceof AppError ? err.message : "Request rejected";
+    console.error("WS violation:", {
+        action,
+        socketId: socket.id,
+        userId: socket.data?.user?.id,
+        err,
+    });
+    // Tell the client once (optional)
+    socket.emit("ERROR", { message });
+    // Drop ONLY this connection if policy says so
+    if (shouldDisconnect(err)) {
+        socket.disconnect(true);
+    }
+}
 /**
- * Setup SECURE Socket.IO endpoint for browser clients
+ * Setup Socket.IO endpoint for browser clients
  */
 export function setupClientWs(io) {
-    //  Store IO instance for broadcasting
     ioInstance = io;
-    //  Middleware - protect middleware validates user
     io.use(protectWs);
-    //  Connection handler - everything is automatic!
-    io.on("connection", (socket) => {
+    io.on("connection", async (socket) => {
         const userId = socket.data.user.id;
-        console.log(` Client WS connected: ${userId}`);
-        //  Send auth success
+        socket.join(userId);
+        console.log(`Client WS connected: ${userId} socket=${socket.id}`);
+        await initializeWeightStreaming(socket, userId, io);
         socket.emit("AUTH_SUCCESS", {
             userId,
             socketId: socket.id,
             timestamp: Date.now(),
         });
-        //  Listen for FEED_NOW
-        socket.on("FEED_NOW", async (msg) => {
-            await handleFeedNow(socket, userId, msg);
+        socket.on("FEED_NOW", async (message) => {
+            const result = await FeedNowSchema.safeParseAsync(message);
+            if (!result.success) {
+                punish(socket, new AppError("Invalid FEED_NOW payload", 400), "FEED_NOW");
+                return;
+            }
+            try {
+                const msg = result.data;
+                await startFeeding(msg.horseId, msg.amountKg, userId);
+            }
+            catch (err) {
+                punish(socket, err, "FEED_NOW");
+            }
         });
-        //  Listen for START_STREAM
-        socket.on("START_STREAM", async (msg) => {
-            await handleStartStream(socket, userId, msg);
+        socket.on("START_STREAM", async (message) => {
+            const result = await StartStreamSchema.safeParseAsync(message);
+            if (!result.success) {
+                punish(socket, new AppError("Invalid START_STREAM payload", 400), "START_STREAM");
+                return;
+            }
+            try {
+                const msg = result.data;
+                await startStreaming(msg.horseId, userId);
+            }
+            catch (err) {
+                punish(socket, err, "START_STREAM");
+            }
         });
-        //  Ping/Pong for keep-alive
-        socket.on("ping", () => {
-            socket.emit("pong");
+        socket.on("LOGOUT", async (_payload, ack) => {
+            await handleLogout(socket, userId, io, ack);
         });
-        //  Automatic disconnect handling - no cleanup needed!
-        socket.on("disconnect", () => {
-            console.log(`❌ Client WS disconnected: ${userId}`);
+        socket.on("disconnecting", () => {
+            handleDisconnecting(socket, userId, io);
         });
+        // socket.on("disconnect", (reason) => {
+        //   console.log(
+        //     `Client WS disconnected: ${userId} socket=${socket.id} reason=${reason}`,
+        //   );
+        // });
     });
 }
 /**
- * Broadcast ANY payload to ALL connected clients
+ * Broadcast payload to ALL connected clients
  */
 export async function broadcastFeedingStatus(payload) {
     if (!ioInstance) {
-        console.warn("⚠️  Socket.IO not initialized");
+        console.warn("⚠️ Socket.IO not initialized");
         return;
     }
-    if (payload.type === "FEEDING_STATUS") {
-        ioInstance.emit("FEEDING_STATUS", payload);
+    try {
+        switch (payload.type) {
+            case "FEEDING_STATUS":
+                ioInstance.emit("FEEDING_STATUS", payload);
+                return;
+            case "STREAM_STATUS":
+                ioInstance.emit("STREAM_STATUS", payload);
+                return;
+            default: {
+                // Unknown payload type = programmer/server bug, not client maliciousness
+                console.error("❌ Unknown broadcast payload.type", payload);
+                return;
+            }
+        }
     }
-    else if (payload.type === "STREAM_STATUS") {
-        ioInstance.emit("STREAM_STATUS", payload);
+    catch (err) {
+        // Rare: circular JSON / internal emit error
+        console.error("❌ Broadcast failed", err);
     }
 }
 /**
@@ -68,73 +127,46 @@ export function sendToUser(userId, payload) {
     //  Socket.IO finds the socket by userId automatically
     ioInstance.to(userId).emit("MESSAGE", payload);
 }
-/**
- * HANDLE FEED_NOW - Send FEED_COMMAND to feeder
- */
-async function handleFeedNow(socket, userId, msg) {
-    const { horseId, amountKg } = msg;
-    console.log(`👤 [${userId}] FEED_NOW: horse=${horseId}, amount=${amountKg}kg`);
-    try {
-        await startFeeding(horseId, amountKg, userId);
-    }
-    catch (err) {
-        socket.emit("ERROR", {
-            message: err instanceof AppError ? err.message : "Feeding failed",
-        });
-    }
-}
-/**
- * HANDLE START_STREAM - Send STREAM_COMMAND to camera
- */
-async function handleStartStream(socket, userId, msg) {
-    const { horseId } = msg;
-    console.log(`👤 [${userId}] START_STREAM: horse=${horseId}`);
-    try {
-        await startStreaming(horseId, userId);
-    }
-    catch (err) {
-        socket.emit("ERROR", {
-            message: err instanceof AppError ? err.message : "Stream failed",
-        });
-    }
-}
-/**
- * Get active clients list
- */
-export function getActiveClients() {
-    if (!ioInstance)
-        return [];
-    //  Socket.IO provides direct access to all sockets
-    return Array.from(ioInstance.sockets.sockets.values())
-        .map((socket) => socket.data.userId)
-        .filter(Boolean);
-}
-/**
- * Cleanup all clients
- */
-export function cleanupClients() {
+export function emitToRoom(room, event, payload) {
     if (!ioInstance)
         return;
-    //  Socket.IO handles cleanup automatically
-    ioInstance.disconnectSockets();
+    ioInstance.to(room).emit(event, payload);
 }
-/**
- * Get connection stats
- */
-export function getConnectionStats() {
-    if (!ioInstance) {
-        return {
-            totalConnections: 0,
-            userIds: [],
-            timestamp: new Date().toISOString(),
-        };
-    }
-    return {
-        totalConnections: ioInstance.sockets.sockets.size,
-        userIds: Array.from(ioInstance.sockets.sockets.values())
-            .map((socket) => socket.data.userId)
-            .filter(Boolean),
-        timestamp: new Date().toISOString(),
-    };
-}
+// /**
+//  * Get active clients list
+//  */
+// export function getActiveClients(): string[] {
+//   if (!ioInstance) return [];
+//   //  Socket.IO provides direct access to all sockets
+//   return Array.from(ioInstance.sockets.sockets.values())
+//     .map((socket) => socket.data.userId)
+//     .filter(Boolean) as string[];
+// }
+// /**
+//  * Cleanup all clients
+//  */
+// export function cleanupClients(): void {
+//   if (!ioInstance) return;
+//   //  Socket.IO handles cleanup automatically
+//   ioInstance.disconnectSockets();
+// }
+// /**
+//  * Get connection stats
+//  */
+// export function getConnectionStats() {
+//   if (!ioInstance) {
+//     return {
+//       totalConnections: 0,
+//       userIds: [],
+//       timestamp: new Date().toISOString(),
+//     };
+//   }
+//   return {
+//     totalConnections: ioInstance.sockets.sockets.size,
+//     userIds: Array.from(ioInstance.sockets.sockets.values())
+//       .map((socket) => socket.data.userId)
+//       .filter(Boolean),
+//     timestamp: new Date().toISOString(),
+//   };
+// }
 //# sourceMappingURL=clientWs.js.map
