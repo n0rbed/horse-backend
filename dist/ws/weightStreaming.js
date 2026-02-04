@@ -37,22 +37,6 @@ export async function initializeWeightStreaming(socket, userId, io) {
         console.error("❌ Weight streaming init failed", { userId, err });
     }
 }
-// export async function handleLogout(
-//   socket: Socket,
-//   userId: string,
-//   io: SocketIOServer,
-// ): Promise<void> {
-//   try {
-//     const toStopNow = getLastWatcherRooms(socket, io);
-//     if (toStopNow.length) {
-//       await publishWeightStreamStopMany(toStopNow);
-//     }
-//   } catch (err) {
-//     console.error("❌ LOGOUT stop failed", { userId, err });
-//   } finally {
-//     socket.disconnect(true);
-//   }
-// }
 export async function handleLogout(socket, userId, io, ack) {
     socket.data.didLogout = true;
     try {

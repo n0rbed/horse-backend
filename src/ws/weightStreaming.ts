@@ -53,24 +53,6 @@ export async function initializeWeightStreaming(
   }
 }
 
-// export async function handleLogout(
-//   socket: Socket,
-//   userId: string,
-//   io: SocketIOServer,
-// ): Promise<void> {
-//   try {
-//     const toStopNow = getLastWatcherRooms(socket, io);
-
-//     if (toStopNow.length) {
-//       await publishWeightStreamStopMany(toStopNow);
-//     }
-//   } catch (err) {
-//     console.error("❌ LOGOUT stop failed", { userId, err });
-//   } finally {
-//     socket.disconnect(true);
-//   }
-// }
-
 export async function handleLogout(
   socket: Socket,
   userId: string,
