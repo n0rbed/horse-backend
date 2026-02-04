@@ -29,6 +29,8 @@ export async function verifyToken(token: string): Promise<JWTPayload> {
 /**
  * Send JWT token as cookie + response
  */
+
+//to adjust
 export function createSendToken(
   user: any,
   statusCode: number,
@@ -43,8 +45,8 @@ export function createSendToken(
         parseInt(process.env.JWT_COOKIE_EXPIRES_IN!) * 24 * 60 * 60 * 1000,
     ),
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict" as const,
+    secure: false,
+    sameSite: "lax" as const,
   };
 
   res.cookie("jwt", token, cookieOptions);

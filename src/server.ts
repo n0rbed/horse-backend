@@ -40,7 +40,7 @@ connectDatabase().then(() => {
   //  Initialize Socket.IO with HTTP server
   const { httpServer, io } = initWsClient(app);
 
-  // ✅ Listen on HTTP server (not app)
+  //  Listen on HTTP server (not app)
   const server = httpServer.listen(Number(PORT), "0.0.0.0", () => {
     console.log(`🚀 Server running on port ${PORT}...`);
 

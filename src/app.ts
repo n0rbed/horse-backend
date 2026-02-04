@@ -37,12 +37,12 @@ expressWs(app);
 app.use(helmet());
 
 // CORS
-app.use(
-  cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
-    credentials: true,
-  }),
-);
+// app.use(
+//   cors({
+//     origin: process.env.CLIENT_URL || "http://44.223.79.212:5173",
+//     credentials: true,
+//   }),
+// );
 
 // Development logging
 if (process.env.NODE_ENV === "development") {
