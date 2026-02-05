@@ -1,7 +1,7 @@
 // src/iot/deviceEventHandler.ts
 import { prisma } from "../lib/prisma.js";
 import { FeedingStatus } from "@prisma/client";
-import { broadcastFeedingStatus } from "../ws/clientWs.js";
+import { broadcastStatus } from "../ws/clientWs.js";
 import type {
   DeviceEvent,
   FeedEventMessage,
@@ -76,7 +76,7 @@ async function handleFeederEvent(
           data: { status: FeedingStatus.STARTED, startedAt: new Date() },
         });
 
-        await broadcastFeedingStatus({
+        await broadcastStatus({
           type: "FEEDING_STATUS",
           horseId,
           feedingId,
@@ -91,7 +91,7 @@ async function handleFeederEvent(
           data: { status: FeedingStatus.RUNNING },
         });
 
-        await broadcastFeedingStatus({
+        await broadcastStatus({
           type: "FEEDING_STATUS",
           horseId,
           feedingId,
@@ -108,7 +108,7 @@ async function handleFeederEvent(
           data: { status: FeedingStatus.COMPLETED, completedAt: now },
         });
 
-        await broadcastFeedingStatus({
+        await broadcastStatus({
           type: "FEEDING_STATUS",
           horseId,
           feedingId,
@@ -128,7 +128,7 @@ async function handleFeederEvent(
           data: { status: FeedingStatus.FAILED },
         });
 
-        await broadcastFeedingStatus({
+        await broadcastStatus({
           type: "FEEDING_STATUS",
           horseId,
           feedingId,
@@ -181,7 +181,7 @@ async function handleCameraEvent(
       case "STREAM_STARTED": {
         const { token } = await generateStreamToken(device.id);
 
-        await broadcastFeedingStatus({
+        await broadcastStatus({
           type: "STREAM_STATUS",
           horseId: horse.id,
           status: "STARTED",
@@ -193,7 +193,7 @@ async function handleCameraEvent(
       // case "STREAM_STOPPED": {
       //   await invalidateStreamToken(device.id);
 
-      //   await broadcastFeedingStatus({
+      //   await broadcastStatus({
       //     type: "STREAM_STATUS",
       //     horseId: horse.id,
       //     status: "ENDED",
@@ -205,7 +205,7 @@ async function handleCameraEvent(
       case "STREAM_ERROR": {
         await invalidateStreamToken(device.id);
 
-        await broadcastFeedingStatus({
+        await broadcastStatus({
           type: "STREAM_STATUS",
           horseId: horse.id,
           status: "ERROR",

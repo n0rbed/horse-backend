@@ -3,7 +3,8 @@ import { prisma } from "../lib/prisma.js";
 import { DeviceType, FeedingStatus } from "@prisma/client";
 import { publishFeedCommand, publishStreamCommand } from "../iot/initAwsIot.js";
 import AppError from "../utils/appError.js";
-import { broadcastFeedingStatus } from "../ws/clientWs.js";
+import { broadcastStatus } from "../ws/clientWs.js";
+import { invalidateStreamToken } from "./streamService.js";
 
 export async function startFeeding(
   horseId: string,
@@ -71,7 +72,7 @@ export async function startFeeding(
   });
 
   // 5) Outside transaction: Broadcast and send IoT command
-  await broadcastFeedingStatus({
+  await broadcastStatus({
     type: "FEEDING_STATUS",
     status: "PENDING",
     feedingId: result.feeding.id,
@@ -124,19 +125,52 @@ export async function startStreaming(horseId: string, userId: string) {
     throw new AppError("Assigned device is not a camera", 400);
   }
 
-  // Optional: immediately tell UI we're requesting stream
-  await broadcastFeedingStatus({
-    type: "STREAM_STATUS",
-    status: "PENDING",
-    horseId: horse.id,
-    streamUrl: "WORKING ON...",
-  });
+  // // Optional: immediately tell UI we're requesting stream
+  // await broadcastFeedingStatus({
+  //   type: "STREAM_STATUS",
+  //   status: "PENDING",
+  //   horseId: horse.id,
+  //   streamUrl: "WORKING ON...",
+  // });
 
   // 3) Send AWS IoT command
   await publishStreamCommand(camera.thingName, {
-    type: "STREAM_COMMAND",
+    type: "STREAM_START_COMMAND",
     horseId: horse.id,
   });
+
+  return { horse, device: camera };
+}
+
+export async function stopStreaming(horseId: string, userId: string) {
+  const horse = await prisma.horse.findFirst({
+    where: { id: horseId, ownerId: userId },
+    select: { id: true, name: true, cameraId: true },
+  });
+
+  if (!horse) throw new AppError("Forbidden horseId", 403);
+
+  if (!horse.cameraId) throw new AppError("Horse has no camera assigned", 404);
+
+  const camera = await prisma.device.findUnique({
+    where: { id: horse.cameraId },
+    select: { id: true, thingName: true, deviceType: true },
+  });
+
+  if (!camera) throw new AppError("Camera device not found", 404);
+
+  if (camera.deviceType !== DeviceType.CAMERA) {
+    throw new AppError("Assigned device is not a camera", 400);
+  }
+
+  // Send STOP command to AWS IoT (device firmware must support it)
+  await publishStreamCommand(camera.thingName, {
+    type: "STREAM_STOP_COMMAND",
+    horseId: horse.id,
+  });
+
+  // Invalidate token so /stream/:token stops working
+  await invalidateStreamToken(camera.id);
 
   return { horse, device: camera };
 }

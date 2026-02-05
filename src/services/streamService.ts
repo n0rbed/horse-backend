@@ -14,6 +14,7 @@ function hashToken(token: string): string {
  * Generate a stream token and store its hash in the database
  * ✅ Now works for CAMERA devices only
  */
+
 export async function generateStreamToken(
   deviceId: string,
 ): Promise<{ token: string }> {

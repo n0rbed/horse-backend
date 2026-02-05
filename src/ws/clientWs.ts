@@ -8,7 +8,11 @@ import type {
 } from "../types/globalTypes.js";
 import AppError from "../utils/appError.js";
 import { protectWs } from "../controllers/authController.js";
-import { startFeeding, startStreaming } from "../services/deviceService.js";
+import {
+  startFeeding,
+  startStreaming,
+  stopStreaming,
+} from "../services/deviceService.js";
 import { FeedNowSchema, StartStreamSchema } from "../lib/validators.js";
 import {
   handleDisconnecting,
@@ -109,6 +113,25 @@ export function setupClientWs(io: SocketIOServer): void {
         punish(socket, err, "START_STREAM");
       }
     });
+    socket.on("STOP_STREAM", async (message: unknown) => {
+      //the same structure
+      const result = await StartStreamSchema.safeParseAsync(message);
+      if (!result.success) {
+        punish(
+          socket,
+          new AppError("Invalid START_STREAM payload", 400),
+          "START_STREAM",
+        );
+        return;
+      }
+
+      try {
+        const msg: StartStreamMessage = result.data;
+        await stopStreaming(msg.horseId, userId);
+      } catch (err) {
+        punish(socket, err, "START_STREAM");
+      }
+    });
 
     socket.on("LOGOUT", async (_payload, ack) => {
       await handleLogout(socket, userId, io, ack);
@@ -129,7 +152,7 @@ export function setupClientWs(io: SocketIOServer): void {
 /**
  * Broadcast payload to ALL connected clients
  */
-export async function broadcastFeedingStatus(
+export async function broadcastStatus(
   payload: BroadcastPayload,
 ): Promise<void> {
   if (!ioInstance) {

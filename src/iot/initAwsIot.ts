@@ -143,7 +143,9 @@ export async function publishFeedCommand(
  */
 export async function publishStreamCommand(
   thingName: string,
-  command: Omit<CommandPayload, "type"> & { type: "STREAM_COMMAND" },
+  command: Omit<CommandPayload, "type"> & {
+    type: "STREAM_START_COMMAND" | "STREAM_STOP_COMMAND";
+  },
 ): Promise<void> {
   await publishCommand(thingName, { ...command, type: "STREAM_COMMAND" });
 }
