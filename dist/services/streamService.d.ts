@@ -1,8 +1,8 @@
 /**
  * Generate a stream token and store its hash in the database
- * ✅ Now works for CAMERA devices only
+ * works for CAMERA devices only
  */
-export declare function generateStreamToken(deviceId: string): Promise<{
+export declare function generateStreamToken(deviceId: string, tx?: any): Promise<{
     token: string;
 }>;
 /**
@@ -12,16 +12,18 @@ export declare function generateStreamToken(deviceId: string): Promise<{
 export declare function validateStreamToken(token: string): Promise<{
     id: string;
     thingName: string;
+    horseId: string | undefined;
 } | null>;
 /**
  * Invalidate stream token
  */
-export declare function invalidateStreamToken(deviceId: string): Promise<void>;
+export declare function invalidateStreamToken(deviceId: string, tx?: any): Promise<void>;
 /**
  * Get camera details by stream token (for stream endpoints)
  */
 export declare function getCameraByToken(token: string): Promise<{
     id: string;
     thingName: string;
+    horseId: string | undefined;
 }>;
 //# sourceMappingURL=streamService.d.ts.map

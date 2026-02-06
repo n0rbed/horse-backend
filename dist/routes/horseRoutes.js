@@ -1,6 +1,6 @@
 // src/routes/horseRoutes.ts
 import express from "express";
-import { getAllHorses, getMyHorses, getHorse, createHorse, updateHorse, deleteHorse, getFeedingActiveStatus, } from "../controllers/horseController.js";
+import { getAllHorses, getMyHorses, getHorse, createHorse, updateHorse, deleteHorse, getFeedingActiveStatus, getHorsesStats, } from "../controllers/horseController.js";
 import { restrictTo } from "../controllers/authController.js";
 import { validateRequest } from "../lib/validateRequest.js";
 import { createHorseSchema, updateHorseSchema } from "../lib/validators.js";
@@ -11,7 +11,8 @@ const router = express.Router();
  * POST /api/v1/horses/me    → Create my horse
  */
 router.route("/me").get(getMyHorses); // Any logged-in user
-router.route("/:horseId/feeding/active").get(getFeedingActiveStatus);
+// router.route("/:horseId/feeding/active").get(getFeedingActiveStatus);
+router.route("/stats").get(getHorsesStats);
 // 2. ADMIN ROUTES (admin only)
 /**
  * GET /api/v1/horses        → All horses (admin only)

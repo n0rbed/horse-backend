@@ -60,32 +60,33 @@ const sendErrorProd = (err, res) => {
 export default (err, req, res, next) => {
     err.statusCode = err.statusCode || 500;
     err.status = err.status || "error";
-    // if (process.env.NODE_ENV === "development") {
-    //   sendErrorDev(err, res);
-    // } else if (process.env.NODE_ENV === "production") {
-    let error = err;
-    // ✅ CORRECT PRISMA CODES
-    if (error.code === "P2002")
-        error = handleDuplicateFieldError(error);
-    if (error.code === "P2025")
-        error = handleNotFoundError(error);
-    if (error.code === "P2003")
-        error = handleForeignKeyError(error);
-    if (error.code === "P3018")
-        error = handleUniqueConstraintError(error);
-    // MQTT Errors
-    if (error.name === "MQTTError" || error.message?.includes("MQTT")) {
-        error = handleMQTTError(error);
+    if (process.env.NODE_ENV === "development") {
+        sendErrorDev(err, res);
     }
-    // JWT errors
-    if (error.name === "JsonWebTokenError")
-        error = handleJWTError();
-    if (error.name === "TokenExpiredError")
-        error = handleJWTExpiredError();
-    // Generic Prisma
-    if (error.code?.startsWith("P"))
-        error = handlePrismaError(error);
-    sendErrorProd(error, res);
-    // }
+    else if (process.env.NODE_ENV === "production") {
+        let error = err;
+        // ✅ CORRECT PRISMA CODES
+        if (error.code === "P2002")
+            error = handleDuplicateFieldError(error);
+        if (error.code === "P2025")
+            error = handleNotFoundError(error);
+        if (error.code === "P2003")
+            error = handleForeignKeyError(error);
+        if (error.code === "P3018")
+            error = handleUniqueConstraintError(error);
+        // MQTT Errors
+        if (error.name === "MQTTError" || error.message?.includes("MQTT")) {
+            error = handleMQTTError(error);
+        }
+        // JWT errors
+        if (error.name === "JsonWebTokenError")
+            error = handleJWTError();
+        if (error.name === "TokenExpiredError")
+            error = handleJWTExpiredError();
+        // Generic Prisma
+        if (error.code?.startsWith("P"))
+            error = handlePrismaError(error);
+        sendErrorProd(error, res);
+    }
 };
 //# sourceMappingURL=errorController.js.map

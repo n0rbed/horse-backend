@@ -23,6 +23,7 @@ export async function verifyToken(token) {
 /**
  * Send JWT token as cookie + response
  */
+//to adjust
 export function createSendToken(user, statusCode, res) {
     const token = signJWT(user.id);
     // Secure cookie options
@@ -30,8 +31,8 @@ export function createSendToken(user, statusCode, res) {
         expires: new Date(Date.now() +
             parseInt(process.env.JWT_COOKIE_EXPIRES_IN) * 24 * 60 * 60 * 1000),
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
+        secure: false,
+        sameSite: "lax",
     };
     res.cookie("jwt", token, cookieOptions);
     res.status(statusCode).json({

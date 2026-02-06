@@ -1,8 +1,9 @@
 import AppError from "../utils/appError.js";
 import { protectWs } from "../controllers/authController.js";
-import { startFeeding, startStreaming } from "../services/deviceService.js";
+import { startFeeding, startStreaming, stopStreaming, } from "../services/deviceService.js";
 import { FeedNowSchema, StartStreamSchema } from "../lib/validators.js";
 import { handleDisconnecting, handleLogout, initializeWeightStreaming, } from "./weightStreaming.js";
+import { initializeCameraStreaming } from "./cameraStreaming.js";
 /**
  * Store Socket.IO server instance globally for broadcasting
  */
@@ -15,7 +16,7 @@ function shouldDisconnect(err) {
     // unknown errors: your choice
     return false;
 }
-function punish(socket, err, action) {
+export function punish(socket, err, action) {
     const message = err instanceof AppError ? err.message : "Request rejected";
     console.error("WS violation:", {
         action,
@@ -41,6 +42,7 @@ export function setupClientWs(io) {
         socket.join(userId);
         console.log(`Client WS connected: ${userId} socket=${socket.id}`);
         await initializeWeightStreaming(socket, userId, io);
+        await initializeCameraStreaming(socket, userId);
         socket.emit("AUTH_SUCCESS", {
             userId,
             socketId: socket.id,
@@ -74,6 +76,21 @@ export function setupClientWs(io) {
                 punish(socket, err, "START_STREAM");
             }
         });
+        socket.on("STOP_STREAM", async (message) => {
+            //the same structure
+            const result = await StartStreamSchema.safeParseAsync(message);
+            if (!result.success) {
+                punish(socket, new AppError("Invalid START_STREAM payload", 400), "START_STREAM");
+                return;
+            }
+            try {
+                const msg = result.data;
+                await stopStreaming(msg.horseId, userId);
+            }
+            catch (err) {
+                punish(socket, err, "START_STREAM");
+            }
+        });
         socket.on("LOGOUT", async (_payload, ack) => {
             await handleLogout(socket, userId, io, ack);
         });
@@ -90,7 +107,7 @@ export function setupClientWs(io) {
 /**
  * Broadcast payload to ALL connected clients
  */
-export async function broadcastFeedingStatus(payload) {
+export async function broadcastStatus(payload) {
     if (!ioInstance) {
         console.warn("⚠️ Socket.IO not initialized");
         return;

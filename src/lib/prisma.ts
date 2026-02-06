@@ -4,7 +4,11 @@ import { PrismaClient } from "@prisma/client";
 import { config } from "dotenv";
 
 // 1. LOAD ENVIRONMENT VARIABLES FIRST
-config({ path: "./config.env" });
+config({
+  path: process.cwd() + "/config.env",
+});
+
+console.log("ENV FILE LOADED:", process.env.DATABASE_URL);
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;

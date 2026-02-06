@@ -1,26 +1,18 @@
 import { MqttClient } from "mqtt";
-import type { DeviceEventHandler, CommandPayload } from "../types/globalTypes.js";
+import type { DeviceEventHandler, FeedCommand, StreamCommand } from "../types/globalTypes.js";
 export declare function getAwsMqttClient(): MqttClient;
 /**
  * Initialize AWS IoT Core (FEEDERS + CAMERAS)
  */
 export declare function initAwsIot(onDeviceEvent: DeviceEventHandler): void;
 /**
- * Send command to ANY device (FEEDER or CAMERA)
+ * Send FEED_COMMAND to feeder
  */
-export declare function publishCommand(thingName: string, command: CommandPayload): Promise<void>;
+export declare function publishFeedCommand(thingName: string, command: FeedCommand): Promise<void>;
 /**
- * Send FEED_COMMAND to feeder (backwards compatible)
+ * Send STREAM command to camera
  */
-export declare function publishFeedCommand(thingName: string, command: Omit<CommandPayload, "type"> & {
-    type: "FEED_COMMAND";
-}): Promise<void>;
-/**
- * Send STREAM_COMMAND to camera
- */
-export declare function publishStreamCommand(thingName: string, command: Omit<CommandPayload, "type"> & {
-    type: "STREAM_COMMAND";
-}): Promise<void>;
+export declare function publishStreamCommand(thingName: string, command: StreamCommand): Promise<void>;
 export declare function disconnect(): Promise<void>;
 /**
  * Tell many feeders to START publishing weight (device firmware must support this)

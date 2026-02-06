@@ -3,7 +3,7 @@ import { Server as SocketIOServer } from "socket.io";
 import { setupClientWs } from "./clientWs.js";
 export function initWsClient(app) {
     const httpServer = http.createServer(app);
-    // ✅ INITIALIZE SOCKET.IO
+    // INITIALIZE SOCKET.IO
     const io = new SocketIOServer(httpServer, {
         cors: {
             origin: process.env.CLIENT_URL || "http://localhost:5173",
@@ -14,9 +14,8 @@ export function initWsClient(app) {
         pingInterval: 25000,
         connectTimeout: 45000,
     });
-    // ✅ Setup Socket.IO handlers from clientWs.ts
+    //  Setup Socket.IO handlers from clientWs.ts
     setupClientWs(io);
-    // setupWeightStreaming()
     return { httpServer, io };
 }
 //# sourceMappingURL=initWsClient.js.map

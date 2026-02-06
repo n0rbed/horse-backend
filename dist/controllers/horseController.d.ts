@@ -8,4 +8,5 @@ export declare const deleteHorse: (req: Request, res: Response, next: NextFuncti
 export declare const restrictToHorseOwner: (req: any, res: any, next: NextFunction) => Promise<void>;
 export declare const bulkAssignHorsesToUser: (req: Request, res: Response, next: NextFunction) => Promise<Response<any, Record<string, any>> | undefined>;
 export declare const getFeedingActiveStatus: (req: Request, res: Response, next: NextFunction) => Promise<Response<any, Record<string, any>> | undefined>;
+export declare function getHorsesStats(req: Request, res: Response, next: NextFunction): Promise<void>;
 //# sourceMappingURL=horseController.d.ts.map

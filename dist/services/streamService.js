@@ -10,14 +10,15 @@ function hashToken(token) {
 }
 /**
  * Generate a stream token and store its hash in the database
- * ✅ Now works for CAMERA devices only
+ * works for CAMERA devices only
  */
-export async function generateStreamToken(deviceId) {
+export async function generateStreamToken(deviceId, tx) {
+    const client = tx || prisma;
     // Generate random token to send to client
     const token = crypto.randomBytes(32).toString("hex");
     // Hash the token before storing in database
     const hashedToken = hashToken(token);
-    await prisma.device.update({
+    await client.device.update({
         where: { id: deviceId },
         data: {
             streamToken: hashedToken,
@@ -25,7 +26,7 @@ export async function generateStreamToken(deviceId) {
         },
     });
     console.log(`📹 Stream token generated for camera: ${deviceId}`);
-    return { token }; // Return unhashed token to client
+    return { token }; // Return unhashed
 }
 /**
  * Validate stream token by hashing and comparing
@@ -42,33 +43,31 @@ export async function validateStreamToken(token) {
         select: {
             id: true,
             thingName: true,
+            horsesAsCamera: {
+                select: {
+                    id: true,
+                },
+            },
         },
     });
     if (!device) {
         return null;
     }
-    return device;
+    return {
+        id: device.id,
+        thingName: device.thingName,
+        horseId: device.horsesAsCamera[0]?.id,
+    };
 }
 /**
  * Invalidate stream token
  */
-export async function invalidateStreamToken(deviceId) {
-    //  Verify device exists before invalidating
-    const device = await prisma.device.findUnique({
+export async function invalidateStreamToken(deviceId, tx) {
+    const client = tx || prisma;
+    await client.device.update({
         where: { id: deviceId },
-        select: { id: true, deviceType: true },
+        data: { streamToken: null, streamTokenIsValid: false },
     });
-    if (!device || device.deviceType !== "CAMERA") {
-        throw new AppError("Camera device not found", 404);
-    }
-    await prisma.device.update({
-        where: { id: deviceId },
-        data: {
-            streamToken: null,
-            streamTokenIsValid: false,
-        },
-    });
-    console.log(`🔒 Stream token invalidated for device: ${deviceId}`);
 }
 /**
  * Get camera details by stream token (for stream endpoints)

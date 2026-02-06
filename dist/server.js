@@ -33,11 +33,11 @@ async function connectDatabase() {
 connectDatabase().then(() => {
     //  Initialize Socket.IO with HTTP server
     const { httpServer, io } = initWsClient(app);
-    // ✅ Listen on HTTP server (not app)
-    const server = httpServer.listen(PORT, () => {
+    //  Listen on HTTP server (not app)
+    const server = httpServer.listen(Number(PORT), "0.0.0.0", () => {
         console.log(`🚀 Server running on port ${PORT}...`);
         // Initialize AWS IoT MQTT connection
-        initAwsIot(handleDeviceEvent);
+        // initAwsIot(handleDeviceEvent);
     });
     // 6. UNHANDLED REJECTIONS
     process.on("unhandledRejection", (err) => {

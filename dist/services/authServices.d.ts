@@ -27,6 +27,7 @@ export declare function signup(userData: {
     passwordResetToken: string | null;
     passwordResetExpires: Date | null;
     role: import("@prisma/client").$Enums.Role;
+    activeStreamHorseId: string | null;
     createdAt: Date;
     updatedAt: Date;
 }>;

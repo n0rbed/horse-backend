@@ -77,7 +77,7 @@ export function initAwsIot(onDeviceEvent) {
 /**
  * Send command to ANY device (FEEDER or CAMERA)
  */
-export async function publishCommand(thingName, command) {
+async function publishCommand(thingName, command) {
     if (!client?.connected) {
         console.error(`❌ Cannot publish to ${thingName}: client not connected`);
         return;
@@ -85,26 +85,21 @@ export async function publishCommand(thingName, command) {
     const deviceType = command.type === "FEED_COMMAND" ? "feeders" : "cameras";
     const topic = `${deviceType}/${thingName}/commands`;
     const payload = JSON.stringify(command);
-    client.publish(topic, payload, { qos: 1 }, (err) => {
-        if (err) {
-            console.error(`❌ Publish failed [${thingName}]:`, err.message);
-        }
-        else {
-            console.log(`✅ ${command.type} sent to ${thingName}`);
-        }
+    await new Promise((resolve, reject) => {
+        client.publish(topic, payload, { qos: 1 }, (err) => err ? reject(err) : resolve());
     });
 }
 /**
- * Send FEED_COMMAND to feeder (backwards compatible)
+ * Send FEED_COMMAND to feeder
  */
 export async function publishFeedCommand(thingName, command) {
-    await publishCommand(thingName, { ...command, type: "FEED_COMMAND" });
+    await publishCommand(thingName, command);
 }
 /**
- * Send STREAM_COMMAND to camera
+ * Send STREAM command to camera
  */
 export async function publishStreamCommand(thingName, command) {
-    await publishCommand(thingName, { ...command, type: "STREAM_COMMAND" });
+    await publishCommand(thingName, command);
 }
 export function disconnect() {
     return new Promise((resolve) => {

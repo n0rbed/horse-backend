@@ -14,7 +14,6 @@ import horseRoutes from "./routes/horseRoutes.js";
 // import testRoutes from "./routes/testRoutes.js";
 // WebSocket setup
 import { setupCameraWs } from "./ws/cameraWs.js";
-// import { setupClientWs } from "./ws/clientWs.js";
 //Authentication
 import { protect } from "./controllers/authController.js";
 // Error handling
@@ -28,21 +27,32 @@ expressWs(app);
 // Security headers
 app.use(helmet());
 // CORS
+// app.use(
+//   cors({
+//     origin: process.env.CLIENT_URL || "http://localhost:4173",
+//     credentials: true,
+//   }),
+// );
 app.use(cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
-    credentials: true,
+    origin: (origin, callback) => {
+        // allow requests with no origin (like Postman)
+        if (!origin)
+            return callback(null, true);
+        callback(null, origin); // echo back the requesting origin
+    },
+    credentials: true, // allow cookies
 }));
 // Development logging
 if (process.env.NODE_ENV === "development") {
     app.use(morgan("dev"));
 }
 // Rate limiting
-const limiter = rateLimit({
-    limit: 100,
-    windowMs: 60 * 60 * 1000,
-    message: "Too many requests from this IP, please try again in an hour",
-});
-app.use("/api", limiter);
+// const limiter = rateLimit({
+//   limit: 100,
+//   windowMs: 60 * 60 * 1000,
+//   message: "Too many requests from this IP, please try again in an hour",
+// });
+// app.use("/api", limiter);
 // Body parser
 app.use(express.json({ limit: "10kb" }));
 app.use(express.urlencoded({ extended: true, limit: "10kb" }));
@@ -55,14 +65,12 @@ app.use("/api/v1/auth", authRoutes);
 app.use(protect);
 app.use("/stream", streamRoutes);
 app.use("/api/v1/horses", horseRoutes);
-// /horses/:horseId/feeding/active
-//test to simulate iot incoming messages
 // app.use("/api/v1/feeders", feederRoutes);
 //no need right now
 // app.use("/api/v1/feedings", feedingRoutes);
 // 3) WEBSOCKET ENDPOINTS AFTER HTTPS
 // setupClientWs(app);
-setupCameraWs(app);
+// setupCameraWs(app);
 // 4) CATCH UNHANDLED ROUTES
 app.all("/{*any}", (req, res, next) => {
     next(new AppError(`cant find the requeted route ${req.originalUrl} on the server`, 404));
