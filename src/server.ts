@@ -18,6 +18,10 @@ import { setupClientWs } from "./ws/clientWs.js";
 import { Server as SocketIOServer } from "socket.io";
 import { WebSocketServer } from "ws";
 
+// 🔥 ADD THESE IMPORTS
+import { initAwsIot } from "./iot/initAwsIot.js";
+import { handleDeviceEvent } from "./iot/deviceEventHandler.js";
+
 const PORT = process.env.PORT || 3000;
 
 if (!fs.existsSync("./temp")) {
@@ -35,6 +39,8 @@ async function connectDatabase() {
 }
 
 connectDatabase().then(() => {
+  initAwsIot(handleDeviceEvent);
+
   // 1. Create HTTP server
   const httpServer = http.createServer(app);
 
@@ -63,6 +69,7 @@ connectDatabase().then(() => {
   // 4. Handle WebSocket upgrades - Route based on path
   httpServer.on("upgrade", (request, socket, head) => {
     const { pathname } = parse(request.url || "");
+
     // Route camera connections to raw WebSocket
     if (pathname?.startsWith("/ws/camera/")) {
       console.log("→ Routing to Camera WebSocket");
