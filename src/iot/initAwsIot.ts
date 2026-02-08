@@ -94,7 +94,8 @@ export function initAwsIot(onDeviceEvent: DeviceEventHandler): void {
   deviceEventHandler = onDeviceEvent;
 
   try {
-    client = mqtt.connect(createClientOptions());
+    const opts = createClientOptions();
+    client = mqtt.connect(`mqtts://${opts.host}:8883`, opts);
     setupConnectionHandlers();
     setupMessageHandlers();
     console.log("🔌 AWS IoT client connecting...");
