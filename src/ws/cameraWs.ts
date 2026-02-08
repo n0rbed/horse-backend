@@ -1,10 +1,20 @@
-// src/ws/cameraWs.ts - For ESP32 cameras (NO user auth)
-import type { Server as SocketIOServer, Socket } from "socket.io";
+// src/ws/cameraWs.ts
+import { WebSocketServer, WebSocket } from "ws";
+import { IncomingMessage } from "http";
 import { prisma } from "../lib/prisma.js";
-import { z } from "zod";
 
-// In-memory storage for active camera frames
 const activeFrames = new Map<string, Buffer>();
+const connectedCameras = new Map<
+  string,
+  {
+    deviceId: string;
+    horseId: string;
+    thingName: string;
+    connectedAt: number;
+    frameCount: number;
+    ws: WebSocket;
+  }
+>();
 
 function isValidImage(buffer: Buffer): boolean {
   return (
@@ -15,10 +25,6 @@ function isValidImage(buffer: Buffer): boolean {
   );
 }
 
-const CameraAuthSchema = z.object({
-  thingName: z.string().min(1),
-});
-
 async function authenticateCamera(thingName: string): Promise<{
   authenticated: boolean;
   deviceId?: string;
@@ -26,6 +32,8 @@ async function authenticateCamera(thingName: string): Promise<{
   error?: string;
 }> {
   try {
+    console.log(`🔍 Looking up camera: ${thingName}`);
+
     const device = await prisma.device.findUnique({
       where: { thingName },
       select: {
@@ -62,121 +70,146 @@ async function authenticateCamera(thingName: string): Promise<{
   }
 }
 
-export function setupCameraWs(io: SocketIOServer): void {
-  // CAMERA namespace "/camera" - NO protectWs middleware!
-  const cameraNamespace = io.of("/camera");
+function safeSend(ws: WebSocket, data: object): boolean {
+  try {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(data));
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error("❌ safeSend error:", error);
+    return false;
+  }
+}
 
-  cameraNamespace.on("connection", (socket: Socket) => {
-    console.log(`📹 Camera connecting: ${socket.id}`);
+export function setupCameraWs(wss: WebSocketServer): void {
+  console.log("📹 Setting up camera WebSocket handlers");
 
-    socket.on("CAMERA_AUTH", async (message: unknown) => {
-      const result = CameraAuthSchema.safeParse(message);
+  wss.on("connection", async (ws: WebSocket, req: IncomingMessage) => {
+    console.log("\n🔵 ========== CAMERA CONNECTION ==========");
+    console.log("URL:", req.url);
 
-      if (!result.success) {
-        console.error("❌ Invalid CAMERA_AUTH:", result.error);
-        socket.emit("CAMERA_AUTH_FAILED", {
-          error: "Invalid payload. Expected: {thingName: string}",
-        });
-        socket.disconnect();
-        return;
-      }
+    // Extract thingName from URL: /ws/camera/CAMERA_NAME
+    const urlParts = req.url?.split("/");
+    const thingName = urlParts?.[3]?.split("?")[0]; // Remove query params if any
 
-      const { thingName } = result.data;
+    if (!thingName) {
+      console.error("❌ No thingName in URL");
+      safeSend(ws, {
+        type: "ERROR",
+        error: "Invalid URL format. Use /ws/camera/YOUR_THING_NAME",
+      });
+      ws.close();
+      return;
+    }
 
-      // if (socket.data.camera) {
-      //   socket.emit("CAMERA_AUTH_FAILED", {
-      //     error: "Already authenticated",
-      //   });
-      //   return;
-      // }
+    console.log(`📹 Camera connecting: ${thingName}`);
 
+    try {
+      safeSend(ws, { type: "CONNECTED", thingName });
+
+      console.log("🔐 Authenticating...");
       const authResult = await authenticateCamera(thingName);
 
       if (!authResult.authenticated) {
-        console.error(
-          `❌ Camera auth failed: ${thingName} - ${authResult.error}`,
-        );
-
-        socket.emit("CAMERA_AUTH_FAILED", { error: authResult.error });
-        socket.disconnect();
+        console.error(`❌ Auth failed: ${authResult.error}`);
+        safeSend(ws, { type: "CAMERA_AUTH_FAILED", error: authResult.error });
+        ws.close();
         return;
       }
 
-      socket.data.camera = {
+      const cameraData = {
         deviceId: authResult.deviceId!,
         horseId: authResult.horseId!,
         thingName,
         connectedAt: Date.now(),
         frameCount: 0,
+        ws,
       };
 
-      console.log(
-        `✅ Camera authenticated: ${thingName} → Horse: ${authResult.horseId}`,
-      );
+      connectedCameras.set(thingName, cameraData);
 
-      socket.emit("CAMERA_AUTHENTICATED", {
+      console.log(`✅ AUTHENTICATED`);
+      console.log(`   Device: ${authResult.deviceId}`);
+      console.log(`   Horse: ${authResult.horseId}`);
+
+      safeSend(ws, {
+        type: "CAMERA_AUTHENTICATED",
         message: "Camera stream active",
         horseId: authResult.horseId,
         thingName,
         timestamp: Date.now(),
       });
-    });
 
-    socket.on("CAMERA_FRAME", (frameBuffer: unknown) => {
-      if (!socket.data.camera) {
-        socket.emit("CAMERA_FRAME_ERROR", {
-          error: "Not authenticated. Send CAMERA_AUTH first.",
-        });
-        return;
-      }
+      console.log("✅ Waiting for frames...\n");
 
-      if (
-        !Buffer.isBuffer(frameBuffer) ||
-        frameBuffer.length < 5000 ||
-        !isValidImage(frameBuffer)
-      ) {
-        console.warn(`⚠️ Invalid frame from ${socket.data.camera.thingName}`);
-        return;
-      }
+      // Handle frames
+      ws.on("message", (data: Buffer) => {
+        const camera = connectedCameras.get(thingName);
+        if (!camera) return;
 
-      socket.data.camera.frameCount++;
+        // Check if it's a text message or binary frame
+        if (data.length < 5000) {
+          // Might be a text message
+          try {
+            const text = data.toString("utf8");
+            console.log(`📩 Received text message: ${text.substring(0, 100)}`);
+          } catch (e) {
+            // Not text, might be small image - ignore
+          }
+          return;
+        }
 
-      // Store latest frame in memory
-      activeFrames.set(socket.data.camera.horseId, frameBuffer);
+        // Validate frame
+        if (!isValidImage(data)) {
+          return;
+        }
 
-      if (socket.data.camera.frameCount % 300 === 0) {
-        console.log(
-          `📹 ${socket.data.camera.thingName}: ${socket.data.camera.frameCount} frames`,
-        );
-      }
-    });
+        camera.frameCount++;
+        activeFrames.set(camera.horseId, data);
 
-    socket.on("disconnect", () => {
-      if (socket.data.camera) {
-        const horseId = socket.data.camera.horseId;
-        const uptime = (
-          (Date.now() - socket.data.camera.connectedAt) /
-          1000
-        ).toFixed(1);
+        if (camera.frameCount % 300 === 0) {
+          console.log(`📹 ${thingName}: ${camera.frameCount} frames received`);
+        }
+      });
 
-        console.log(
-          `📹 Camera disconnected: ${socket.data.camera.thingName} (${socket.data.camera.frameCount} frames, ${uptime}s)`,
-        );
+      ws.on("close", (code, reason) => {
+        console.log(`\n🔴 Camera disconnected: ${thingName}`);
+        console.log(`   Code: ${code}`);
+        console.log(`   Reason: ${reason}`);
 
-        // Remove frame from memory
-        activeFrames.delete(horseId);
-        console.log(`🗑️ Cleaned up frame for horse: ${horseId}`);
-      }
-    });
+        const camera = connectedCameras.get(thingName);
+
+        if (camera) {
+          const uptime = ((Date.now() - camera.connectedAt) / 1000).toFixed(1);
+          console.log(`   Frames: ${camera.frameCount}`);
+          console.log(`   Uptime: ${uptime}s\n`);
+
+          activeFrames.delete(camera.horseId);
+          connectedCameras.delete(thingName);
+        }
+      });
+
+      ws.on("error", (error) => {
+        console.error(`❌ WebSocket error (${thingName}):`, error);
+      });
+    } catch (error) {
+      console.error("❌ Handler error:", error);
+      ws.close();
+    }
   });
 }
 
-// Export function to get frame for HTTP streaming
 export function getLatestFrame(horseId: string): Buffer | null {
   return activeFrames.get(horseId) || null;
 }
 
-// Export function to check active cameras
-export function getActiveCameraCount(): number {
-  return activeFrames.size;
+export function disconnectCamera(thingName: string): boolean {
+  const camera = connectedCameras.get(thingName);
+  if (camera) {
+    camera.ws.close();
+    return true;
+  }
+  return false;
 }

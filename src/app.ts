@@ -1,6 +1,5 @@
 // src/app.js
 import express from "express";
-import expressWs from "express-ws";
 import morgan from "morgan";
 import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
@@ -15,7 +14,6 @@ import horseRoutes from "./routes/horseRoutes.js";
 // import testRoutes from "./routes/testRoutes.js";
 
 // WebSocket setup
-import { setupCameraWs } from "./ws/cameraWs.js";
 
 //Authentication
 import { protect } from "./controllers/authController.js";
@@ -26,9 +24,6 @@ import GlobalError from "./controllers/errorController.js";
 
 // Initialize Express app
 const app = express();
-
-// Initialize express-ws
-expressWs(app);
 
 // 1) GLOBAL MIDDLEWARES
 
@@ -89,10 +84,6 @@ app.use("/api/v1/horses", horseRoutes);
 
 //no need right now
 // app.use("/api/v1/feedings", feedingRoutes);
-
-// 3) WEBSOCKET ENDPOINTS AFTER HTTPS
-// setupClientWs(app);
-// setupCameraWs(app);
 
 // 4) CATCH UNHANDLED ROUTES
 app.all("/{*any}", (req, res, next) => {

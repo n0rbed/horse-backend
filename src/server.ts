@@ -1,11 +1,11 @@
 // src/server.ts
 import { config } from "dotenv";
 import fs from "fs";
+import http from "http";
+import { parse } from "url";
 
-// 1. LOAD ENVIRONMENT VARIABLES FIRST
 config({ path: "./config.env" });
 
-// 2. UNCAUGHT EXCEPTIONS
 process.on("uncaughtException", (err) => {
   console.log("💥 UNCAUGHT EXCEPTION! Shutting down...");
   console.log(err.name, err.message);
@@ -13,18 +13,17 @@ process.on("uncaughtException", (err) => {
 });
 
 import app, { prisma } from "./app.js";
-import { initAwsIot } from "./iot/initAwsIot.js";
-import { handleDeviceEvent } from "./iot/deviceEventHandler.js";
-import { initWsClient } from "./ws/initWsClient.js";
+import { setupCameraWs } from "./ws/cameraWs.js";
+import { setupClientWs } from "./ws/clientWs.js";
+import { Server as SocketIOServer } from "socket.io";
+import { WebSocketServer } from "ws";
 
 const PORT = process.env.PORT || 3000;
 
-// 3. ENSURE TEMP DIRECTORY EXISTS
 if (!fs.existsSync("./temp")) {
   fs.mkdirSync("./temp");
 }
 
-// 4. DATABASE CONNECTION
 async function connectDatabase() {
   try {
     await prisma.$connect();
@@ -35,20 +34,50 @@ async function connectDatabase() {
   }
 }
 
-// 5. START SERVER
 connectDatabase().then(() => {
-  //  Initialize Socket.IO with HTTP server
-  const { httpServer, io } = initWsClient(app);
+  // 1. Create HTTP server
+  const httpServer = http.createServer(app);
 
-  //  Listen on HTTP server (not app)
-  const server = httpServer.listen(Number(PORT), "0.0.0.0", () => {
-    console.log(`🚀 Server running on port ${PORT}...`);
-
-    // Initialize AWS IoT MQTT connection
-    initAwsIot(handleDeviceEvent);
+  // 2. Create Raw WebSocket Server for cameras (noServer mode)
+  const wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: 10 * 1024 * 1024,
   });
 
-  // 6. UNHANDLED REJECTIONS
+  setupCameraWs(wss);
+
+  // 3. Initialize Socket.IO for web clients
+  const io = new SocketIOServer(httpServer, {
+    path: "/socket.io",
+    cors: {
+      origin: process.env.CLIENT_URL || "http://localhost:5173",
+      credentials: true,
+    },
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    connectTimeout: 45000,
+  });
+
+  setupClientWs(io);
+
+  // 4. Handle WebSocket upgrades - Route based on path
+  httpServer.on("upgrade", (request, socket, head) => {
+    const { pathname } = parse(request.url || "");
+    // Route camera connections to raw WebSocket
+    if (pathname?.startsWith("/ws/camera/")) {
+      console.log("→ Routing to Camera WebSocket");
+
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit("connection", ws, request);
+      });
+    }
+  });
+
+  // 5. Start server
+  const server = httpServer.listen(Number(PORT), "0.0.0.0", () => {
+    console.log(`\n🚀 Server running on port ${PORT}`);
+  });
+
   process.on("unhandledRejection", (err: any) => {
     console.log("💥 UNHANDLED REJECTION! Shutting down...");
     console.log(err.name, err.message);
@@ -59,11 +88,11 @@ connectDatabase().then(() => {
     });
   });
 
-  // 7. GRACEFUL SHUTDOWN
   process.on("SIGTERM", () => {
     console.log("👋 SIGTERM received. Shutting down gracefully...");
     server.close(() => {
-      io.close(); // ✅ Close Socket.IO connections
+      io.close();
+      wss.close();
       prisma.$disconnect();
       console.log("💤 Process terminated!");
     });

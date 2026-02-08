@@ -4,7 +4,6 @@ import path from "path";
 import fs from "fs/promises";
 import { validateStreamToken } from "../services/streamService.js";
 import { getLatestFrame } from "../ws/cameraWs.js";
-// import { getLatestFrame } from "../ws/cameraStreaming.js";
 
 const router: Router = express.Router();
 const PLACEHOLDER_PATH = path.resolve("./temp/placeholder.jpg");
