@@ -49,6 +49,7 @@ export function setupCameraWs(wss: WebSocketServer): void {
     const auth = await authenticateCamera(thingName);
     if (!auth) return ws.close();
 
+    // Initialize the queue
     frameQueues.set(auth.horseId, { queue: [], waiters: [] });
 
     ws.on("message", (data: Buffer) => {
@@ -67,7 +68,7 @@ export function setupCameraWs(wss: WebSocketServer): void {
       fq.queue.push(data);
 
       if (fq.queue.length > MAX_QUEUE) {
-        fq.queue.shift(); // bounded delay
+        fq.queue.shift(); // drop oldest if buffer too big
       }
     });
 
@@ -81,6 +82,10 @@ export function setupCameraWs(wss: WebSocketServer): void {
   });
 }
 
+/**
+ * Waits for the next frame from a given horseId.
+ * Resolves immediately if a frame is already queued.
+ */
 export async function waitForFrame(horseId: string): Promise<Buffer | null> {
   const fq = frameQueues.get(horseId);
   if (!fq) return null;
