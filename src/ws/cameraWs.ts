@@ -41,7 +41,6 @@ export function setupCameraWs(wss: WebSocketServer): void {
   wss.on("connection", async (ws: WebSocket, req: IncomingMessage) => {
     const url = req.url;
     if (!url) return ws.close();
-
     const parts = url.split("/");
     const thingName = parts[3];
     if (!thingName) return ws.close();
@@ -54,21 +53,19 @@ export function setupCameraWs(wss: WebSocketServer): void {
 
     ws.on("message", (data: Buffer) => {
       if (!isValidImage(data)) return;
-
       const fq = frameQueues.get(auth.horseId);
       if (!fq) return;
 
       // Wake a waiting stream immediately
-      const waiter = fq!.waiters.shift();
+      const waiter = fq.waiters.shift();
       if (waiter) {
         waiter(data);
         return;
       }
 
-      fq!.queue.push(data);
-
-      if (fq!.queue.length > MAX_QUEUE) {
-        fq!.queue.shift(); // drop oldest if buffer too big
+      fq.queue.push(data);
+      if (fq.queue.length > MAX_QUEUE) {
+        fq.queue.shift(); // drop oldest if buffer too big
       }
     });
 
