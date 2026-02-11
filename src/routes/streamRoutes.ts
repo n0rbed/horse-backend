@@ -3,7 +3,7 @@ import type { Request, Response } from "express";
 import path from "path";
 import fs from "fs/promises";
 import { validateStreamToken } from "../services/streamService.js";
-import { getNextFrame } from "../ws/cameraWs.js";
+import { waitForFrame } from "../ws/cameraWs.js";
 
 const router: Router = express.Router();
 const PLACEHOLDER_PATH = path.resolve("./temp/placeholder.jpg");
@@ -33,9 +33,9 @@ router.get("/:token", async (req: Request, res: Response) => {
   if (!token) return res.sendStatus(400);
 
   const streamData = await validateStreamToken(token);
-  if (!streamData || !streamData.horseId) return res.sendStatus(410);
+  if (!streamData?.horseId) return res.sendStatus(410);
 
-  const horseId: string = streamData.horseId;
+  const horseId = streamData.horseId;
 
   res.writeHead(200, {
     "Content-Type": "multipart/x-mixed-replace; boundary=frame",
@@ -44,15 +44,26 @@ router.get("/:token", async (req: Request, res: Response) => {
     "X-Accel-Buffering": "no",
   });
 
-  const interval = setInterval(() => {
-    const frame = getNextFrame(horseId) ?? placeholderBuffer;
-    if (!frame) return;
+  let firstFrame = true;
 
-    res.write(createMjpegFrame(frame));
-  }, 33); // ~30 FPS playback
+  while (!res.destroyed) {
+    const frame = await waitForFrame(horseId);
 
-  req.on("close", () => clearInterval(interval));
-  req.on("error", () => clearInterval(interval));
+    if (!frame) {
+      if (firstFrame && placeholderBuffer) {
+        res.write(createMjpegFrame(placeholderBuffer));
+      }
+      await new Promise(r => setTimeout(r, 50));
+      continue;
+    }
+
+    firstFrame = false;
+
+    const ok = res.write(createMjpegFrame(frame));
+    if (!ok) {
+      await new Promise(resolve => res.once("drain", resolve));
+    }
+  }
 });
 
 export default router;
