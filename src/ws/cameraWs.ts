@@ -57,10 +57,12 @@ export function setupCameraWs(wss: WebSocketServer): void {
       if (!fq) return;
 
       // Wake a waiting stream immediately
-      const waiter = fq.waiters.shift();
-      if (waiter) {
-        waiter(data);
-        return;
+      if (fq.waiters.length > 0) {
+        const waiter = fq.waiters.shift();
+        if (waiter) {
+          waiter(data);
+          return;
+        }
       }
 
       fq.queue.push(data);
