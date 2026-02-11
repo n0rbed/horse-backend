@@ -28,11 +28,16 @@ function createMjpegFrame(frameBytes: Buffer): Buffer {
 }
 
 router.get("/:token", async (req: Request, res: Response) => {
-  const token = req.params.token;
+  const rawToken = req.params.token;
+
+  // Fix: token can be string | string[]
+  const token = Array.isArray(rawToken) ? rawToken[0] : rawToken;
   if (!token) return res.sendStatus(400);
 
   const streamData = await validateStreamToken(token);
   if (!streamData || !streamData.horseId) return res.sendStatus(410);
+
+  const horseId: string = streamData.horseId; // now guaranteed string
 
   res.writeHead(200, {
     "Content-Type": "multipart/x-mixed-replace; boundary=frame",
@@ -41,11 +46,11 @@ router.get("/:token", async (req: Request, res: Response) => {
   });
 
   const interval = setInterval(() => {
-    const frame = getNextFrame(streamData.horseId) || placeholderBuffer;
+    const frame = getNextFrame(horseId) || placeholderBuffer;
     if (!frame) return;
 
     res.write(createMjpegFrame(frame));
-  }, 33);
+  }, 33); // ~30fps playback
 
   req.on("close", () => clearInterval(interval));
 });
