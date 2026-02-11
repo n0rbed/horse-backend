@@ -3,6 +3,7 @@ import type { IncomingMessage } from "http";
 import { prisma } from "../lib/prisma.js";
 
 const frameQueues = new Map<string, Buffer[]>();
+const lastFrames = new Map<string, Buffer>();
 const MAX_QUEUE = 300; // ~5s @60fps
 
 function isValidImage(buffer: Buffer): boolean {
@@ -27,7 +28,7 @@ async function authenticateCamera(thingName: string): Promise<{
   if (!device.horsesAsCamera || device.horsesAsCamera.length === 0) return null;
 
   const horse = device.horsesAsCamera[0];
-  if (!horse) return null; // satisfy TS
+  if (!horse) return null;
 
   return {
     deviceId: device.id,
@@ -57,6 +58,7 @@ export function setupCameraWs(wss: WebSocketServer): void {
     }
 
     frameQueues.set(auth.horseId, []);
+    lastFrames.delete(auth.horseId);
 
     ws.on("message", (data: Buffer) => {
       if (!isValidImage(data)) return;
@@ -65,20 +67,31 @@ export function setupCameraWs(wss: WebSocketServer): void {
       if (!queue) return;
 
       queue.push(data);
+      lastFrames.set(auth.horseId, data);
 
       if (queue.length > MAX_QUEUE) {
-        queue.shift(); // controlled drop if backlog too big
+        queue.shift(); // controlled drop if buffer too large
       }
     });
 
     ws.on("close", () => {
       frameQueues.delete(auth.horseId);
+      lastFrames.delete(auth.horseId);
+    });
+
+    ws.on("error", () => {
+      frameQueues.delete(auth.horseId);
+      lastFrames.delete(auth.horseId);
     });
   });
 }
 
 export function getNextFrame(horseId: string): Buffer | null {
   const queue = frameQueues.get(horseId);
-  if (!queue || queue.length === 0) return null;
+
+  if (!queue || queue.length === 0) {
+    return lastFrames.get(horseId) ?? null;
+  }
+
   return queue.shift() ?? null;
 }
