@@ -49,7 +49,7 @@ export function setupCameraWs(wss: WebSocketServer): void {
     const auth = await authenticateCamera(thingName);
     if (!auth) return ws.close();
 
-    // Initialize the queue
+    // Initialize the queue for this horse
     frameQueues.set(auth.horseId, { queue: [], waiters: [] });
 
     ws.on("message", (data: Buffer) => {
@@ -59,16 +59,16 @@ export function setupCameraWs(wss: WebSocketServer): void {
       if (!fq) return;
 
       // Wake a waiting stream immediately
-      const waiter = fq.waiters.shift();
+      const waiter = fq!.waiters.shift();
       if (waiter) {
         waiter(data);
         return;
       }
 
-      fq.queue.push(data);
+      fq!.queue.push(data);
 
-      if (fq.queue.length > MAX_QUEUE) {
-        fq.queue.shift(); // drop oldest if buffer too big
+      if (fq!.queue.length > MAX_QUEUE) {
+        fq!.queue.shift(); // drop oldest if buffer too big
       }
     });
 
