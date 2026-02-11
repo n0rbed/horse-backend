@@ -3,14 +3,16 @@ import type { IncomingMessage } from "http";
 import { prisma } from "../lib/prisma.js";
 
 const frameQueues = new Map<string, Buffer[]>();
-
-const MAX_QUEUE = 300;
+const MAX_QUEUE = 300; // ~5s @60fps
 
 function isValidImage(buffer: Buffer): boolean {
   return buffer.length > 2 && buffer[0] === 0xff && buffer[1] === 0xd8;
 }
 
-async function authenticateCamera(thingName: string) {
+async function authenticateCamera(thingName: string): Promise<{
+  deviceId: string;
+  horseId: string;
+} | null> {
   const device = await prisma.device.findUnique({
     where: { thingName },
     select: {
@@ -24,23 +26,35 @@ async function authenticateCamera(thingName: string) {
   if (device.deviceType !== "CAMERA") return null;
   if (!device.horsesAsCamera || device.horsesAsCamera.length === 0) return null;
 
+  const horse = device.horsesAsCamera[0];
+  if (!horse) return null; // satisfy TS
+
   return {
     deviceId: device.id,
-    horseId: device.horsesAsCamera[0].id,
+    horseId: horse.id,
   };
 }
 
 export function setupCameraWs(wss: WebSocketServer): void {
   wss.on("connection", async (ws: WebSocket, req: IncomingMessage) => {
     const url = req.url;
-    if (!url) return ws.close();
+    if (!url) {
+      ws.close();
+      return;
+    }
 
     const parts = url.split("/");
     const thingName = parts[3];
-    if (!thingName) return ws.close();
+    if (!thingName) {
+      ws.close();
+      return;
+    }
 
     const auth = await authenticateCamera(thingName);
-    if (!auth) return ws.close();
+    if (!auth) {
+      ws.close();
+      return;
+    }
 
     frameQueues.set(auth.horseId, []);
 
@@ -53,7 +67,7 @@ export function setupCameraWs(wss: WebSocketServer): void {
       queue.push(data);
 
       if (queue.length > MAX_QUEUE) {
-        queue.shift();
+        queue.shift(); // controlled drop if backlog too big
       }
     });
 
@@ -66,5 +80,5 @@ export function setupCameraWs(wss: WebSocketServer): void {
 export function getNextFrame(horseId: string): Buffer | null {
   const queue = frameQueues.get(horseId);
   if (!queue || queue.length === 0) return null;
-  return queue.shift()!;
+  return queue.shift() ?? null;
 }
