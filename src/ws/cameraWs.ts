@@ -31,9 +31,12 @@ async function authenticateCamera(thingName: string): Promise<{
   if (device.deviceType !== "CAMERA") return null;
   if (!device.horsesAsCamera?.length) return null;
 
+  const horse = device.horsesAsCamera[0];
+  if (!horse) return null;
+
   return {
     deviceId: device.id,
-    horseId: device.horsesAsCamera[0].id,
+    horseId: horse.id,
   };
 }
 
