@@ -61,7 +61,7 @@ function dequeueFrame(buffer: FrameBuffer): Buffer | null {
   buffer.readIndex = (buffer.readIndex + 1) % buffer.maxSize;
   buffer.count--;
 
-  return frame;
+  return frame || null;
 }
 
 function getBufferStats(buffer: FrameBuffer) {
