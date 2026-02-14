@@ -168,7 +168,7 @@ router.get("/:token", async (req: Request, res: Response) => {
 
 // Health check endpoint
 router.get("/health/:horseId", async (req: Request, res: Response) => {
-  const { horseId } = req.params;
+  const { horseId } = req.params as { horseId: string };
   const bufferInfo = getBufferInfo(horseId);
 
   if (!bufferInfo) {
