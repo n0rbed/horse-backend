@@ -1,18 +1,9 @@
-// src/ws/cameraWs.ts - Optimized with frame buffering
+// src/ws/cameraWs.ts
 import { WebSocketServer, WebSocket } from "ws";
 import { IncomingMessage } from "http";
 import { prisma } from "../lib/prisma.js";
 
-// Frame buffer for each horse - stores up to 100 frames
-interface FrameBuffer {
-  frames: Buffer[];
-  maxSize: number;
-  writeIndex: number;
-  readIndex: number;
-  count: number;
-}
-
-const frameBuffers = new Map<string, FrameBuffer>();
+// Always stores the single latest frame per horse — no queue, no latency
 const activeFrames = new Map<string, Buffer>();
 
 const connectedCameras = new Map<
@@ -28,51 +19,7 @@ const connectedCameras = new Map<
   }
 >();
 
-function createFrameBuffer(maxSize: number = 100): FrameBuffer {
-  return {
-    frames: new Array(maxSize),
-    maxSize,
-    writeIndex: 0,
-    readIndex: 0,
-    count: 0,
-  };
-}
-
-function enqueueFrame(buffer: FrameBuffer, frame: Buffer): boolean {
-  if (buffer.count >= buffer.maxSize) {
-    // Buffer full - drop oldest frame
-    buffer.readIndex = (buffer.readIndex + 1) % buffer.maxSize;
-    buffer.count--;
-  }
-
-  buffer.frames[buffer.writeIndex] = frame;
-  buffer.writeIndex = (buffer.writeIndex + 1) % buffer.maxSize;
-  buffer.count++;
-
-  return true;
-}
-
-function dequeueFrame(buffer: FrameBuffer): Buffer | null {
-  if (buffer.count === 0) {
-    return null;
-  }
-
-  const frame = buffer.frames[buffer.readIndex];
-  buffer.readIndex = (buffer.readIndex + 1) % buffer.maxSize;
-  buffer.count--;
-
-  return frame || null;
-}
-
-function getBufferStats(buffer: FrameBuffer) {
-  return {
-    count: buffer.count,
-    maxSize: buffer.maxSize,
-    utilization: ((buffer.count / buffer.maxSize) * 100).toFixed(1),
-  };
-}
-
-function isValidImage(buffer: Buffer): boolean {
+function isValidJpeg(buffer: Buffer): boolean {
   return (
     buffer.length > 2 &&
     buffer[0] === 0xff &&
@@ -88,37 +35,28 @@ async function authenticateCamera(thingName: string): Promise<{
   error?: string;
 }> {
   try {
-    console.log(`🔍 Looking up camera: ${thingName}`);
+    console.log(`🔍 Authenticating camera: ${thingName}`);
 
     const device = await prisma.device.findUnique({
       where: { thingName },
       select: {
         id: true,
         deviceType: true,
-        horsesAsCamera: {
-          select: { id: true },
-        },
+        horsesAsCamera: { select: { id: true } },
       },
     });
 
-    if (!device) {
+    if (!device)
       return { authenticated: false, error: "Camera not found in database" };
-    }
-
-    if (device.deviceType !== "CAMERA") {
+    if (device.deviceType !== "CAMERA")
       return { authenticated: false, error: "Device is not a camera" };
-    }
-
-    if (!device.horsesAsCamera || device.horsesAsCamera.length === 0) {
+    if (!device.horsesAsCamera || device.horsesAsCamera.length === 0)
       return { authenticated: false, error: "Camera not linked to any horse" };
-    }
-
-    const horse = device.horsesAsCamera[0];
 
     return {
       authenticated: true,
       deviceId: device.id,
-      horseId: horse!.id,
+      horseId: device.horsesAsCamera[0]!.id,
     };
   } catch (error) {
     console.error("❌ Camera auth error:", error);
@@ -140,32 +78,24 @@ function safeSend(ws: WebSocket, data: object): boolean {
 }
 
 export function setupCameraWs(wss: WebSocketServer): void {
-  console.log("🔹 Setting up camera WebSocket handlers");
+  console.log("🔹 Camera WebSocket handler ready");
 
   wss.on("connection", async (ws: WebSocket, req: IncomingMessage) => {
     console.log("\n🔵 ========== CAMERA CONNECTION ==========");
-    console.log("URL:", req.url);
 
-    // Extract thingName from URL: /ws/camera/CAMERA_NAME
     const urlParts = req.url?.split("/");
     const thingName = urlParts?.[3]?.split("?")[0];
 
     if (!thingName) {
-      console.error("❌ No thingName in URL");
-      safeSend(ws, {
-        type: "ERROR",
-        error: "Invalid URL format. Use /ws/camera/YOUR_THING_NAME",
-      });
+      safeSend(ws, { type: "ERROR", error: "Invalid URL. Use /ws/camera/THING_NAME" });
       ws.close();
       return;
     }
 
-    console.log(`🔹 Camera connecting: ${thingName}`);
+    console.log(`🔹 Connecting: ${thingName}`);
+    safeSend(ws, { type: "CONNECTED", thingName });
 
     try {
-      safeSend(ws, { type: "CONNECTED", thingName });
-
-      console.log("🔍 Authenticating...");
       const authResult = await authenticateCamera(thingName);
 
       if (!authResult.authenticated) {
@@ -187,15 +117,7 @@ export function setupCameraWs(wss: WebSocketServer): void {
 
       connectedCameras.set(thingName, cameraData);
 
-      // Create frame buffer for this horse
-      if (!frameBuffers.has(cameraData.horseId)) {
-        frameBuffers.set(cameraData.horseId, createFrameBuffer(100));
-        console.log(`📦 Frame buffer created for horse: ${cameraData.horseId}`);
-      }
-
-      console.log(`✅ AUTHENTICATED`);
-      console.log(`   Device: ${authResult.deviceId}`);
-      console.log(`   Horse: ${authResult.horseId}`);
+      console.log(`✅ AUTHENTICATED | Device: ${authResult.deviceId} | Horse: ${authResult.horseId}`);
 
       safeSend(ws, {
         type: "CAMERA_AUTHENTICATED",
@@ -205,127 +127,80 @@ export function setupCameraWs(wss: WebSocketServer): void {
         timestamp: Date.now(),
       });
 
-      console.log("✅ Waiting for frames...\n");
+      // Rate tracking
+      let lastReport = Date.now();
+      let recentFrames = 0;
 
-      // Handle frames
-      ws.on("message", (data: Buffer) => {
+      // ✅ isBinary flag — no more length-based text detection hack
+      ws.on("message", (data: Buffer, isBinary: boolean) => {
         const camera = connectedCameras.get(thingName);
         if (!camera) return;
 
-        // Check if it's a text message or binary frame
-        if (data.length < 5000) {
-          try {
-            const text = data.toString("utf8");
-            if (text.length < 200) {
-              console.log(`📩 Received text message: ${text}`);
-            }
-          } catch (e) {
-            // Not text, might be small image
-          }
+        if (!isBinary) {
+          console.log(`📩 Text from ${thingName}: ${data.toString("utf8").slice(0, 100)}`);
           return;
         }
 
-        // Validate frame
-        if (!isValidImage(data)) {
+        if (!isValidJpeg(data)) {
           camera.droppedFrames++;
           return;
         }
 
+        // ✅ Just overwrite latest frame — zero latency, always fresh
+        activeFrames.set(camera.horseId, data);
         camera.frameCount++;
+        recentFrames++;
 
-        // Get or create frame buffer
-        const buffer = frameBuffers.get(camera.horseId);
-        if (buffer) {
-          // Add frame to buffer
-          enqueueFrame(buffer, data);
-
-          // Also keep latest frame for immediate access
-          activeFrames.set(camera.horseId, data);
-
-          // Log stats every 300 frames
-          if (camera.frameCount % 300 === 0) {
-            const stats = getBufferStats(buffer);
-            console.log(
-              `🔹 ${thingName}: ${camera.frameCount} frames | Buffer: ${stats.count}/${stats.maxSize} (${stats.utilization}%) | Dropped: ${camera.droppedFrames}`
-            );
-          }
+        // Log actual incoming FPS every 5 seconds
+        const now = Date.now();
+        if (now - lastReport >= 5000) {
+          const fps = (recentFrames / ((now - lastReport) / 1000)).toFixed(1);
+          const sizeKB = (data.length / 1024).toFixed(1);
+          console.log(
+            `📸 ${thingName}: ${fps} FPS | ${sizeKB} KB/frame | ` +
+            `Total: ${camera.frameCount} | Dropped: ${camera.droppedFrames}`
+          );
+          recentFrames = 0;
+          lastReport = now;
         }
       });
 
-      ws.on("close", (code, reason) => {
-        console.log(`\n🔴 Camera disconnected: ${thingName}`);
-        console.log(`   Code: ${code}`);
-        console.log(`   Reason: ${reason}`);
-
+      ws.on("close", (code) => {
         const camera = connectedCameras.get(thingName);
-
         if (camera) {
           const uptime = ((Date.now() - camera.connectedAt) / 1000).toFixed(1);
-          const buffer = frameBuffers.get(camera.horseId);
-          const stats = buffer ? getBufferStats(buffer) : null;
-
-          console.log(`   Frames received: ${camera.frameCount}`);
-          console.log(`   Frames dropped: ${camera.droppedFrames}`);
-          if (stats) {
-            console.log(
-              `   Buffer state: ${stats.count}/${stats.maxSize} (${stats.utilization}%)`
-            );
-          }
-          console.log(`   Uptime: ${uptime}s\n`);
-
-          // Clear active frame but keep buffer for streaming
+          console.log(
+            `\n🔴 ${thingName} disconnected | Code: ${code} | ` +
+            `Frames: ${camera.frameCount} | Dropped: ${camera.droppedFrames} | Uptime: ${uptime}s\n`
+          );
           activeFrames.delete(camera.horseId);
           connectedCameras.delete(thingName);
         }
       });
 
       ws.on("error", (error) => {
-        console.error(`❌ WebSocket error (${thingName}):`, error);
+        console.error(`❌ WS error (${thingName}):`, error);
       });
+
     } catch (error) {
-      console.error("❌ Handler error:", error);
+      console.error("❌ Connection handler error:", error);
       ws.close();
     }
   });
 }
 
-// Get latest frame (for immediate display)
+// Latest frame — called by stream route on every tick
 export function getLatestFrame(horseId: string): Buffer | null {
   return activeFrames.get(horseId) || null;
 }
 
-// Get buffered frame (for smooth playback)
-export function getBufferedFrame(horseId: string): Buffer | null {
-  const buffer = frameBuffers.get(horseId);
-  if (!buffer) return null;
-
-  const frame = dequeueFrame(buffer);
-  return frame || activeFrames.get(horseId) || null;
-}
-
-// Get buffer statistics
-export function getBufferInfo(horseId: string) {
-  const buffer = frameBuffers.get(horseId);
-  if (!buffer) return null;
-
-  return getBufferStats(buffer);
-}
-
-// Clear buffer for a horse
-export function clearBuffer(horseId: string): void {
-  const buffer = frameBuffers.get(horseId);
-  if (buffer) {
-    buffer.readIndex = 0;
-    buffer.writeIndex = 0;
-    buffer.count = 0;
-  }
+// Check if a camera is currently connected
+export function isCameraConnected(thingName: string): boolean {
+  return connectedCameras.has(thingName);
 }
 
 export function disconnectCamera(thingName: string): boolean {
   const camera = connectedCameras.get(thingName);
-  if (camera) {
-    camera.ws.close();
-    return true;
-  }
+  if (camera) { camera.ws.close(); return true; }
   return false;
 }
